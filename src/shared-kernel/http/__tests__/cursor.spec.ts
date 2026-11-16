@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { ValidationError } from '../../errors/index.js';
 import { buildPage, decodeCursor, encodeCursor, pageQuerySchema } from '../cursor.js';
-import { ok } from '../envelope.js';
+import { isEnveloped } from '../envelope.js';
 
 const positionSchema = z.object({ finishedAt: z.string(), id: z.string() });
 
@@ -54,8 +54,18 @@ describe('buildPage', () => {
   });
 });
 
-describe('ok', () => {
-  it('envelopa em { data }', () => {
-    expect(ok({ id: '1' })).toEqual({ data: { id: '1' } });
+describe('paged', () => {
+  it('marca a página como envelope sem expor a marca no JSON', () => {
+    const page = buildPage(
+      [{ id: 'a' }],
+      20,
+      (r) => r.id,
+      (r) => ({ id: r.id }),
+    );
+    expect(isEnveloped(page)).toBe(true);
+    expect(JSON.parse(JSON.stringify(page))).toEqual({
+      data: ['a'],
+      page: { limit: 20, hasMore: false, nextCursor: null },
+    });
   });
 });

@@ -6,7 +6,7 @@ import {
   type ArgumentsHost,
   type ExceptionFilter,
 } from '@nestjs/common';
-import type { Request, Response } from 'express';
+import { HttpAdapterHost } from '@nestjs/core';
 import { ZodError } from 'zod';
 import type { ApiErrorBody } from './api-error-body.js';
 import { DomainError } from './domain-error.js';
@@ -78,19 +78,19 @@ function formatPath(path: PropertyKey[]): string {
 export class HttpExceptionFilter implements ExceptionFilter {
   private readonly logger = new Logger(HttpExceptionFilter.name);
 
+  constructor(private readonly adapterHost: HttpAdapterHost) {}
+
   catch(exception: unknown, host: ArgumentsHost): void {
     const http = host.switchToHttp();
-    const req = http.getRequest<Request & { id?: unknown }>();
-    const res = http.getResponse<Response>();
     const { status, body } = toApiError(exception);
 
     // Detalhe de falhas inesperadas vai só para o log (e Sentry), nunca para a resposta.
     if (status >= 500) this.logger.error(exception);
 
-    const traceId =
-      typeof req.id === 'string' ? req.id : String(res.getHeader('X-Request-Id') ?? '');
+    const { id } = http.getRequest<{ id?: unknown }>();
+    const traceId = typeof id === 'string' ? id : '';
     const payload: ApiErrorBody = { error: { ...body, traceId } };
     if (!payload.error.details?.length) delete payload.error.details;
-    res.status(status).json(payload);
+    this.adapterHost.httpAdapter.reply(http.getResponse(), payload, status);
   }
 }

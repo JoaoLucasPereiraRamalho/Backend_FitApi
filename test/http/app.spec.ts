@@ -1,18 +1,23 @@
-import type { INestApplication } from '@nestjs/common';
+import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
-import type { Server } from 'node:http';
 import { AppModule } from '../../src/app.module.js';
-import { CLOCK, FixedClock } from '../../src/platform/clock-and-ids/index.js';
+import {
+  CLOCK,
+  FixedClock,
+  SystemClock,
+  UuidV7Generator,
+} from '../../src/platform/clock-and-ids/index.js';
 import { PrismaService } from '../../src/platform/database/index.js';
+import { createFastifyAdapter } from '../../src/platform/logging/index.js';
 
 // Sobe o processo api de verdade (módulos, filtro global, logging), sem banco:
 // o PrismaService é trocado por um dublê. Testes com Postgres real ficam em test/integration.
 // As variáveis de ambiente vêm de test/setup-env.ts.
 
 describe('processo api (HTTP)', () => {
-  let app: INestApplication;
-  const http = () => request(app.getHttpServer() as Server);
+  let app: NestFastifyApplication;
+  const http = () => request(app.getHttpServer());
   const queryRaw = vi.fn();
 
   beforeAll(async () => {
@@ -22,9 +27,12 @@ describe('processo api (HTTP)', () => {
       .overrideProvider(CLOCK)
       .useValue(new FixedClock('2026-11-12T14:03:22Z'))
       .compile();
-    app = moduleRef.createNestApplication();
+    app = moduleRef.createNestApplication<NestFastifyApplication>(
+      createFastifyAdapter(new UuidV7Generator(new SystemClock())),
+    );
     app.setGlobalPrefix('v1');
     await app.init();
+    await app.getHttpAdapter().getInstance().ready();
   });
 
   afterAll(async () => {
@@ -35,7 +43,7 @@ describe('processo api (HTTP)', () => {
     queryRaw.mockResolvedValueOnce([1]);
     const res = await http().get('/v1/health').expect(200);
     expect(res.body).toEqual({
-      data: { status: 'up', checks: { database: 'up' }, checkedAt: '2026-11-12T14:03:22.000Z' },
+      data: { status: 'ok', checks: { database: 'ok' }, checkedAt: '2026-11-12T14:03:22.000Z' },
     });
     expect(res.headers['x-request-id']).toMatch(/^[0-9a-f-]{36}$/);
   });

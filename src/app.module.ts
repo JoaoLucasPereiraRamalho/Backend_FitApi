@@ -1,10 +1,11 @@
 import { Module } from '@nestjs/common';
-import { APP_FILTER } from '@nestjs/core';
+import { APP_FILTER, APP_INTERCEPTOR } from '@nestjs/core';
 import { ClockAndIdsModule } from './platform/clock-and-ids/index.js';
 import { ConfigModule } from './platform/config/index.js';
 import { DatabaseModule, HealthController } from './platform/database/index.js';
 import { LoggingModule } from './platform/logging/index.js';
 import { HttpExceptionFilter } from './shared-kernel/errors/index.js';
+import { EnvelopeInterceptor } from './shared-kernel/http/index.js';
 
 /**
  * Composição do processo api (HTTP + WebSocket). Os módulos de negócio entram aqui
@@ -14,6 +15,9 @@ import { HttpExceptionFilter } from './shared-kernel/errors/index.js';
 @Module({
   imports: [ConfigModule.forRoot('api'), ClockAndIdsModule, LoggingModule, DatabaseModule],
   controllers: [HealthController],
-  providers: [{ provide: APP_FILTER, useClass: HttpExceptionFilter }],
+  providers: [
+    { provide: APP_FILTER, useClass: HttpExceptionFilter },
+    { provide: APP_INTERCEPTOR, useClass: EnvelopeInterceptor },
+  ],
 })
 export class AppModule {}

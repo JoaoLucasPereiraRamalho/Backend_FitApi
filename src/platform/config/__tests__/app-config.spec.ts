@@ -2,46 +2,42 @@ import { InvalidConfigError, loadConfig } from '../app-config.js';
 
 const validEnv = {
   DATABASE_URL: 'postgresql://fittrack:fittrack@localhost:5432/fittrack',
-  STORAGE_ENDPOINT: 'http://localhost:9000',
-  STORAGE_REGION: 'us-east-1',
-  STORAGE_BUCKET: 'fittrack-local',
-  STORAGE_ACCESS_KEY: 'key',
-  STORAGE_SECRET_KEY: 'secret',
-  JWT_ISSUER: 'fittrack-api',
-  JWT_AUDIENCE: 'fittrack-clients',
-  JWT_ACCESS_SECRET: 'x'.repeat(32),
-  MIN_APP_VERSION: '1.0.0',
 };
 
 describe('loadConfig', () => {
   it('aplica valores padrão e monta a configuração tipada', () => {
-    const config = loadConfig(validEnv);
-    expect(config.port).toBe(3000);
-    expect(config.processRole).toBe('api');
-    expect(config.jwt.accessTtlSeconds).toBe(900);
-    expect(config.storage.bucket).toBe('fittrack-local');
+    expect(loadConfig(validEnv)).toEqual({
+      processRole: 'api',
+      nodeEnv: 'development',
+      port: 3000,
+      logLevel: 'info',
+      databaseUrl: validEnv.DATABASE_URL,
+    });
   });
 
-  it('converte números vindos como texto', () => {
+  it('converte a porta vinda como texto', () => {
     expect(loadConfig({ ...validEnv, PORT: '8080' }).port).toBe(8080);
   });
 
-  it('recusa subir com variável ausente, citando o nome', () => {
-    const { DATABASE_URL: _omitted, ...withoutDb } = validEnv;
-    expect(() => loadConfig(withoutDb)).toThrow(InvalidConfigError);
-    expect(() => loadConfig(withoutDb)).toThrow(/DATABASE_URL/);
+  it('recusa variável ausente, citando o nome', () => {
+    expect(() => loadConfig({})).toThrow(InvalidConfigError);
+    expect(() => loadConfig({})).toThrow(/DATABASE_URL/);
   });
 
-  it('recusa segredo JWT curto e versão mínima malformada', () => {
-    expect(() => loadConfig({ ...validEnv, JWT_ACCESS_SECRET: 'curto' })).toThrow(
-      /JWT_ACCESS_SECRET/,
-    );
-    expect(() => loadConfig({ ...validEnv, MIN_APP_VERSION: '1.0' })).toThrow(/MIN_APP_VERSION/);
+  it('recusa porta fora da faixa e ambiente desconhecido', () => {
+    expect(() => loadConfig({ ...validEnv, PORT: '70000' })).toThrow(/PORT/);
+    expect(() => loadConfig({ ...validEnv, PORT: 'abc' })).toThrow(/PORT/);
+    expect(() => loadConfig({ ...validEnv, NODE_ENV: 'staging' })).toThrow(/NODE_ENV/);
   });
 
   it('recusa DATABASE_URL que não seja PostgreSQL', () => {
-    expect(() => loadConfig({ ...validEnv, DATABASE_URL: 'mysql://localhost/db' })).toThrow(
-      /DATABASE_URL/,
+    expect(() => loadConfig({ DATABASE_URL: 'mysql://localhost/db' })).toThrow(/DATABASE_URL/);
+    expect(() => loadConfig({ DATABASE_URL: 'não é url' })).toThrow(/DATABASE_URL/);
+  });
+
+  it('lista todos os problemas de uma vez', () => {
+    expect(() => loadConfig({ PORT: '0' })).toThrow(
+      /PORT[\s\S]*DATABASE_URL|DATABASE_URL[\s\S]*PORT/,
     );
   });
 });

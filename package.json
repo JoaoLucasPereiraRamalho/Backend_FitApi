@@ -10,7 +10,7 @@
     "build": "nest build",
     "start:api": "node dist/main.api.js",
     "start:worker": "node dist/main.worker.js",
-    "dev:api": "nest start --watch --entryFile main.api",
+    "dev": "nest start --watch --entryFile main.api",
     "dev:worker": "nest start --watch --entryFile main.worker",
     "lint": "eslint .",
     "format": "prettier --write .",
@@ -27,7 +27,7 @@
   "dependencies": {
     "@nestjs/common": "^12.4.2",
     "@nestjs/core": "^12.4.2",
-    "@nestjs/platform-express": "^12.4.2",
+    "@nestjs/platform-fastify": "^12.5.0",
     "@prisma/adapter-pg": "^7.10.1",
     "@prisma/client": "^7.10.1",
     "dotenv": "^18.0.10",
@@ -44,7 +44,6 @@
     "@eslint/js": "^10.0.1",
     "@nestjs/cli": "^12.0.12",
     "@nestjs/testing": "^12.4.2",
-    "@types/express": "^5.0.6",
     "@types/luxon": "^3.7.6",
     "@types/node": "^24.0.0",
     "@types/pg": "^8.23.1",
@@ -63,5 +62,13 @@
     "vite": "^8.3.8",
     "vitest": "^4.1.12"
   },
-  "type": "module"
+  "type": "module",
+  "packageManager": "pnpm@10.34.9",
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "@prisma/engines",
+      "esbuild",
+      "prisma"
+    ]
+  }
 }

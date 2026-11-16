@@ -1,9 +1,8 @@
 import { Controller, Get, HttpCode, HttpStatus, Inject, Res } from '@nestjs/common';
-import type { Response } from 'express';
 import { CLOCK, type Clock } from '../clock-and-ids/index.js';
 import { PrismaService } from './prisma.service.js';
 
-type CheckStatus = 'up' | 'down';
+type CheckStatus = 'ok' | 'down';
 
 export interface HealthReport {
   status: CheckStatus;
@@ -11,7 +10,12 @@ export interface HealthReport {
   checkedAt: string;
 }
 
-/** GET /v1/health — público, para monitoramento. 503 quando o banco não responde. */
+/** O suficiente da resposta HTTP para trocar o status; serve para Fastify e Express. */
+export interface StatusSettable {
+  status(code: number): unknown;
+}
+
+/** GET /v1/health — público, para monitoramento. 503 quando o banco não responde. O envelope { data } vem do EnvelopeInterceptor. */
 @Controller('health')
 export class HealthController {
   constructor(
@@ -21,22 +25,16 @@ export class HealthController {
 
   @Get()
   @HttpCode(HttpStatus.OK)
-  async check(@Res({ passthrough: true }) res: Response): Promise<{ data: HealthReport }> {
+  async check(@Res({ passthrough: true }) reply: StatusSettable): Promise<HealthReport> {
     const database = await this.checkDatabase();
-    if (database === 'down') res.status(HttpStatus.SERVICE_UNAVAILABLE);
-    return {
-      data: {
-        status: database,
-        checks: { database },
-        checkedAt: this.clock.now().toISOString(),
-      },
-    };
+    if (database === 'down') reply.status(HttpStatus.SERVICE_UNAVAILABLE);
+    return { status: database, checks: { database }, checkedAt: this.clock.now().toISOString() };
   }
 
   private async checkDatabase(): Promise<CheckStatus> {
     try {
       await this.prisma.$queryRaw`SELECT 1`;
-      return 'up';
+      return 'ok';
     } catch {
       return 'down';
     }

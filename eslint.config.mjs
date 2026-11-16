@@ -5,7 +5,7 @@ import globals from 'globals';
 import tseslint from 'typescript-eslint';
 
 /**
- * Regra 6 dos testes de arquitetura (docs/estrutura-de-pastas-e-modulos.md, seção 5):
+ * Regra 6 dos testes de arquitetura (docs/ESTRUTURA.md, seção 5):
  * só `platform/clock-and-ids` pode ler o relógio ou gerar UUID. O resto usa as portas Clock e IdGenerator.
  */
 const noClockOrIdsOutsidePlatform = {
@@ -20,7 +20,8 @@ const noClockOrIdsOutsidePlatform = {
       message: 'Use a porta Clock (platform/clock-and-ids) em vez de Date.now().',
     },
     {
-      selector: "CallExpression[callee.property.name='randomUUID']",
+      selector:
+        "CallExpression[callee.property.name='randomUUID'], CallExpression[callee.name='randomUUID']",
       message: 'Use a porta IdGenerator (platform/clock-and-ids) em vez de randomUUID().',
     },
     {
@@ -30,7 +31,16 @@ const noClockOrIdsOutsidePlatform = {
   ],
   'no-restricted-imports': [
     'error',
-    { paths: [{ name: 'uuid', message: 'Use a porta IdGenerator (platform/clock-and-ids).' }] },
+    {
+      paths: [
+        { name: 'uuid', message: 'Use a porta IdGenerator (platform/clock-and-ids).' },
+        ...['crypto', 'node:crypto'].map((name) => ({
+          name,
+          importNames: ['randomUUID'],
+          message: 'Use a porta IdGenerator (platform/clock-and-ids).',
+        })),
+      ],
+    },
   ],
 };
 
@@ -67,7 +77,7 @@ export default tseslint.config(
   },
   {
     files: ['src/platform/clock-and-ids/**/*.ts'],
-    rules: { 'no-restricted-syntax': 'off' },
+    rules: { 'no-restricted-syntax': 'off', 'no-restricted-imports': 'off' },
   },
   {
     // Scripts e configuração de ferramentas ficam fora das regras de Clock e de process.env.
@@ -75,7 +85,8 @@ export default tseslint.config(
     rules: { 'no-restricted-properties': 'off', 'no-restricted-syntax': 'off' },
   },
   {
-    files: ['src/platform/config/**/*.ts'],
+    // Testes montam o ambiente do processo de propósito (setup e cenários de config inválida).
+    files: ['src/platform/config/**/*.ts', 'test/**/*.ts'],
     rules: { 'no-restricted-properties': 'off' },
   },
   {

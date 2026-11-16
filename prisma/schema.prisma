@@ -1,4 +1,4 @@
-// Schema único, dividido por seções conforme os módulos (docs/estrutura-de-pastas-e-modulos.md, seção 6).
+// Schema único, dividido por seções conforme os módulos (docs/ESTRUTURA.md, seção 6).
 // Cada tabela pertence a um módulo. Instantes são timestamptz (UTC); datas locais são derivadas
 // do fuso do aluno no momento do cálculo. IDs são UUID v7 gerados pela porta IdGenerator.
 

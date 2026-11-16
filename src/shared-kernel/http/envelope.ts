@@ -14,10 +14,16 @@ export interface PageEnvelope<T> {
   page: PageInfo;
 }
 
-export function ok<T>(data: T): DataEnvelope<T> {
-  return { data };
-}
+/**
+ * Marca as páginas já montadas, para o interceptor não embrulhar de novo. É um símbolo,
+ * então não aparece no JSON e não colide com um campo `data` de algum recurso.
+ */
+const ENVELOPED = Symbol('enveloped');
 
 export function paged<T>(items: T[], page: PageInfo): PageEnvelope<T> {
-  return { data: items, page };
+  return Object.defineProperty({ data: items, page }, ENVELOPED, { value: true });
+}
+
+export function isEnveloped(value: unknown): boolean {
+  return typeof value === 'object' && value !== null && ENVELOPED in value;
 }

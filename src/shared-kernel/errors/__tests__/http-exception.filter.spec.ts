@@ -1,4 +1,5 @@
 import { BadRequestException, NotFoundException, type ArgumentsHost } from '@nestjs/common';
+import type { HttpAdapterHost } from '@nestjs/core';
 import { z } from 'zod';
 import { DomainError, NotFoundError } from '../domain-error.js';
 import { HttpExceptionFilter, toApiError } from '../http-exception.filter.js';
@@ -57,24 +58,24 @@ describe('toApiError', () => {
 });
 
 describe('HttpExceptionFilter', () => {
-  function run(exception: unknown) {
-    const json = vi.fn();
-    const status = vi.fn(() => ({ json }));
+  const response = { kind: 'resposta' };
+
+  function run(exception: unknown, request: object) {
+    const reply = vi.fn();
+    const adapterHost = { httpAdapter: { reply } } as unknown as HttpAdapterHost;
     const host = {
-      switchToHttp: () => ({
-        getRequest: () => ({ id: 'req-12345678' }),
-        getResponse: () => ({ status, getHeader: () => undefined }),
-      }),
+      switchToHttp: () => ({ getRequest: () => request, getResponse: () => response }),
     } as unknown as ArgumentsHost;
-    new HttpExceptionFilter().catch(exception, host);
-    return { status, json };
+    new HttpExceptionFilter(adapterHost).catch(exception, host);
+    return reply;
   }
 
   it('responde no formato de erro da API com traceId e sem details vazio', () => {
-    const { status, json } = run(new NotFoundError());
-    expect(status).toHaveBeenCalledWith(404);
-    expect(json).toHaveBeenCalledWith({
-      error: { code: 'NOT_FOUND', message: 'Recurso não encontrado.', traceId: 'req-12345678' },
-    });
+    const reply = run(new NotFoundError(), { id: 'req-12345678' });
+    expect(reply).toHaveBeenCalledWith(
+      response,
+      { error: { code: 'NOT_FOUND', message: 'Recurso não encontrado.', traceId: 'req-12345678' } },
+      404,
+    );
   });
 });
