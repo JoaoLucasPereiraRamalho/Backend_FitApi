@@ -1,0 +1,39 @@
+name: Commits
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  conventional:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Verificar título do PR e mensagens de commit
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          pattern='^(build|chore|ci|docs|feat|fix|perf|refactor|revert|spike|style|test)(\([a-z0-9-]+\))?!?: .+'
+          failed=0
+
+          if ! grep -qE "$pattern" <<< "$PR_TITLE"; then
+            echo "::error::Título do PR fora do padrão Conventional Commits: $PR_TITLE"
+            failed=1
+          fi
+
+          while IFS= read -r subject; do
+            if ! grep -qE "$pattern" <<< "$subject"; then
+              echo "::error::Commit fora do padrão Conventional Commits: $subject"
+              failed=1
+            fi
+          done < <(git log --no-merges --format=%s "$BASE_SHA..$HEAD_SHA")
+
+          exit "$failed"
