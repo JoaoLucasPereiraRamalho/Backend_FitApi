@@ -16,20 +16,50 @@ Mudanças de contrato ou de estrutura são feitas primeiro nesses documentos e d
 
 - Node.js 24 (`.nvmrc`)
 - pnpm 10 (`corepack enable` instala a versão fixada em `package.json`)
-- Docker (PostgreSQL 17 e MinIO pelo `docker-compose.yml`)
+- Docker com Compose v2 (PostgreSQL 17 e MinIO pelo `docker-compose.yml`)
 
-## Como rodar
+## Ambiente local
+
+### Primeira vez
 
 ```bash
+corepack enable
 pnpm install                    # também gera o cliente Prisma
 cp .env.example .env
-docker compose up -d
-pnpm prisma migrate dev --name init
-pnpm prisma:seed
 pnpm dev                        # http://localhost:3000/v1/health
+pnpm prisma:seed                # em outro terminal, com a API no ar
 ```
 
+`pnpm dev` sobe o PostgreSQL e o MinIO do `docker-compose.yml` (esperando o banco ficar saudável), aplica as migrações pendentes com `prisma migrate deploy` e inicia a API com recarga automática. Nas próximas vezes, basta `pnpm dev`.
+
 `GET /v1/health` responde `200` com `{ "data": { "status": "ok", ... } }`, ou `503` com `"status": "down"` se o banco não responder.
+
+No Windows com WSL 2, ative a integração com a sua distribuição em Docker Desktop > Settings > Resources > WSL integration; sem ela, o comando `docker` não existe dentro do WSL.
+
+### Serviços
+
+| Serviço          | Endereço                | Acesso                         |
+| ---------------- | ----------------------- | ------------------------------ |
+| API              | `http://localhost:3000` | prefixo `/v1`                  |
+| PostgreSQL       | `localhost:5432`        | `fittrack` / `fittrack`        |
+| MinIO (S3)       | `http://localhost:9000` | `fittrack` / `fittrack-secret` |
+| Console do MinIO | `http://localhost:9001` | `fittrack` / `fittrack-secret` |
+
+Os dados ficam nos volumes `postgres-data` e `storage-data`. `pnpm env:down` para os contêineres e mantém os dados; `docker compose down -v` apaga os volumes para recomeçar do zero.
+
+Para criar uma migração nova durante o desenvolvimento, use `pnpm prisma:migrate --name <nome>`.
+
+### Web e mobile apontando para esta API
+
+Os fronts escolhem a API por variável de ambiente; nenhum código muda entre local e homologação.
+
+| Front                                | Variável              | API local                                | Homologação                |
+| ------------------------------------ | --------------------- | ---------------------------------------- | -------------------------- |
+| `fittrack-web`                       | `VITE_API_URL`        | `http://localhost:3000/v1`               | URL de homologação + `/v1` |
+| `fittrack-mobile` (Android emulador) | `EXPO_PUBLIC_API_URL` | `http://10.0.2.2:3000/v1`                | URL de homologação + `/v1` |
+| `fittrack-mobile` (aparelho)         | `EXPO_PUBLIC_API_URL` | `http://<IP da máquina na rede>:3000/v1` | URL de homologação + `/v1` |
+
+A API escuta em `0.0.0.0`, então aparelhos na mesma rede alcançam a máquina de desenvolvimento pelo IP local.
 
 ## Variáveis de ambiente
 
@@ -47,14 +77,16 @@ Em `development` os logs saem formatados (pino-pretty); nos demais ambientes, em
 
 ## Scripts
 
-| Script                                     | O que faz                                     |
-| ------------------------------------------ | --------------------------------------------- |
-| `pnpm dev` / `pnpm dev:worker`             | Sobe a API ou o worker com recarga automática |
-| `pnpm build`                               | Compila para `dist/`                          |
-| `pnpm start:api` / `pnpm start:worker`     | Roda a versão compilada                       |
-| `pnpm test` / `test:watch` / `test:cov`    | Testes (Vitest)                               |
-| `pnpm lint` / `pnpm typecheck`             | ESLint e TypeScript                           |
-| `pnpm prisma:migrate` / `pnpm prisma:seed` | Migrações e dados iniciais                    |
+| Script                                     | O que faz                                                               |
+| ------------------------------------------ | ----------------------------------------------------------------------- |
+| `pnpm dev`                                 | Sobe o ambiente, aplica migrações e inicia a API com recarga automática |
+| `pnpm dev:api` / `pnpm dev:worker`         | Só a API ou o worker com recarga automática (ambiente já no ar)         |
+| `pnpm env:up` / `pnpm env:down`            | Sobe ou para o PostgreSQL e o MinIO do `docker-compose.yml`             |
+| `pnpm build`                               | Compila para `dist/`                                                    |
+| `pnpm start:api` / `pnpm start:worker`     | Roda a versão compilada                                                 |
+| `pnpm test` / `test:watch` / `test:cov`    | Testes (Vitest)                                                         |
+| `pnpm lint` / `pnpm typecheck`             | ESLint e TypeScript                                                     |
+| `pnpm prisma:migrate` / `pnpm prisma:seed` | Migrações e dados iniciais                                              |
 
 ## Estrutura
 
