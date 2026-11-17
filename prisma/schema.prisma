@@ -72,6 +72,21 @@ model User {
   badges            StudentBadge[]
   loadConfirmations LoadConfirmation[]
 
+  trainerNotesWritten    TrainerNote[]       @relation("TrainerNoteAuthor")
+  trainerNotesAbout      TrainerNote[]       @relation("TrainerNoteStudent")
+  bodyMeasurements       BodyMeasurement[]
+  anamnesis              Anamnesis?
+  anamnesisVersions      AnamnesisVersion[]
+  healthDataOwned        HealthDataAccess[]  @relation("HealthDataOwner")
+  healthDataRead         HealthDataAccess[]  @relation("HealthDataReader")
+  conversationsAsTrainer Conversation[]      @relation("ConversationTrainer")
+  conversationsAsStudent Conversation[]      @relation("ConversationStudent")
+  messagesSent           Message[]
+  notifications          Notification[]
+  files                  StoredFile[]
+  attachmentsReceived    StudentAttachment[] @relation("AttachmentStudent")
+  attachmentsShared      StudentAttachment[] @relation("AttachmentTrainer")
+
   @@map("users")
 }
 
@@ -251,9 +266,10 @@ model Link {
   endedAt   DateTime?    @map("ended_at") @db.Timestamptz
   endedBy   LinkEndedBy? @map("ended_by")
 
-  trainer User    @relation("LinkTrainer", fields: [trainerId], references: [id], onDelete: Restrict)
-  student User    @relation("LinkStudent", fields: [studentId], references: [id], onDelete: Restrict)
-  invite  Invite? @relation(fields: [inviteId], references: [id], onDelete: SetNull)
+  trainer      User          @relation("LinkTrainer", fields: [trainerId], references: [id], onDelete: Restrict)
+  student      User          @relation("LinkStudent", fields: [studentId], references: [id], onDelete: Restrict)
+  invite       Invite?       @relation(fields: [inviteId], references: [id], onDelete: SetNull)
+  conversation Conversation?
 
   @@index([trainerId, status])
   @@index([studentId, startedAt])
@@ -297,6 +313,7 @@ model Exercise {
   equipmentKey   String    @map("equipment_key")
   instructions   String[]
   videoUrl       String?   @map("video_url")
+  mediaFileId    String?   @map("media_file_id") @db.Uuid // imagem ou vídeo enviado (files)
   badgeKey       String?   @unique @map("badge_key") // RN10: liga o exercício base aos badges de força
   createdAt      DateTime  @map("created_at") @db.Timestamptz
   updatedAt      DateTime  @map("updated_at") @db.Timestamptz
@@ -305,6 +322,7 @@ model Exercise {
   owner             User?                 @relation(fields: [ownerId], references: [id], onDelete: Restrict)
   muscleGroup       MuscleGroup           @relation(fields: [muscleGroupKey], references: [key], onDelete: Restrict)
   equipment         Equipment             @relation(fields: [equipmentKey], references: [key], onDelete: Restrict)
+  mediaFile         StoredFile?           @relation(fields: [mediaFileId], references: [id], onDelete: SetNull)
   alternatives      ExerciseAlternative[] @relation("AlternativeOf")
   alternativeTo     ExerciseAlternative[] @relation("AlternativeExercise")
   prescribedItems   PrescribedItem[]
@@ -485,6 +503,11 @@ model ExecutedSession {
   sets              ExecutedSet[]
   badgesUnlocked    StudentBadge[]
 
+  // RNF04: histórico e timeline por aluno, mais recentes primeiro. A timeline da carteira busca os
+  // 20 mais recentes de cada aluno com CROSS JOIN LATERAL a partir de links e depois corta em 20;
+  // juntar tudo antes de ordenar faz o Postgres varrer a tabela inteira.
+  @@index([studentId, startedAt])
+  @@index([studentId, finishedAt])
   @@map("executed_sessions")
 }
 
@@ -665,6 +688,229 @@ model LoadConfirmation {
 
   @@index([studentId, status])
   @@map("load_confirmations")
+}
+
+// =====================================================================
+// students
+// =====================================================================
+
+// Anotações privadas do treinador sobre o aluno; o aluno nunca vê.
+model TrainerNote {
+  id        String   @id @db.Uuid
+  trainerId String   @map("trainer_id") @db.Uuid
+  studentId String   @map("student_id") @db.Uuid
+  content   String
+  createdAt DateTime @map("created_at") @db.Timestamptz
+  updatedAt DateTime @map("updated_at") @db.Timestamptz
+
+  trainer User @relation("TrainerNoteAuthor", fields: [trainerId], references: [id], onDelete: Cascade)
+  student User @relation("TrainerNoteStudent", fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@index([trainerId, studentId, updatedAt])
+  @@map("trainer_notes")
+}
+
+// Peso e medidas datados (dado pessoal sensível). Faixas válidas em CHECK na migração.
+model BodyMeasurement {
+  id             String   @id @db.Uuid
+  studentId      String   @map("student_id") @db.Uuid
+  measuredAt     DateTime @map("measured_at") @db.Timestamptz
+  weightKg       Decimal  @map("weight_kg") @db.Decimal(5, 2)
+  bodyFatPercent Decimal? @map("body_fat_percent") @db.Decimal(4, 1)
+  waistCm        Decimal? @map("waist_cm") @db.Decimal(5, 1)
+  armCm          Decimal? @map("arm_cm") @db.Decimal(5, 1)
+  thighCm        Decimal? @map("thigh_cm") @db.Decimal(5, 1)
+  createdAt      DateTime @map("created_at") @db.Timestamptz
+
+  student User @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@index([studentId, measuredAt])
+  @@map("body_measurements")
+}
+
+// Uma anamnese por aluno; cada salvamento cria uma versão nova e a anterior fica no histórico.
+// O conteúdo segue o corpo de PUT /me/anamnesis (objetivo, experiência, saúde, estilo de vida).
+model Anamnesis {
+  id        String   @id @db.Uuid
+  studentId String   @unique @map("student_id") @db.Uuid
+  createdAt DateTime @map("created_at") @db.Timestamptz
+  updatedAt DateTime @map("updated_at") @db.Timestamptz
+
+  student  User               @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  versions AnamnesisVersion[]
+
+  @@map("anamneses")
+}
+
+model AnamnesisVersion {
+  id          String   @id @db.Uuid
+  anamnesisId String   @map("anamnesis_id") @db.Uuid
+  number      Int
+  content     Json
+  authorId    String   @map("author_id") @db.Uuid // o aluno ou o treinador vinculado
+  createdAt   DateTime @map("created_at") @db.Timestamptz
+
+  anamnesis Anamnesis @relation(fields: [anamnesisId], references: [id], onDelete: Cascade)
+  author    User      @relation(fields: [authorId], references: [id], onDelete: Restrict)
+
+  @@unique([anamnesisId, number])
+  @@map("anamnesis_versions")
+}
+
+enum HealthDataResource {
+  ANAMNESIS
+  BODY_MEASUREMENTS
+  STUDENT_ATTACHMENT
+}
+
+// Auditoria de leitura de dados de saúde (RNF05, LGPD): quem leu, de qual aluno, o quê e quando.
+// Só recebe inserções; o aluno consulta em GET /me/privacy/access-log.
+model HealthDataAccess {
+  id         String             @id @db.Uuid
+  studentId  String             @map("student_id") @db.Uuid
+  readerId   String             @map("reader_id") @db.Uuid
+  resource   HealthDataResource
+  resourceId String?            @map("resource_id") @db.Uuid
+  readAt     DateTime           @map("read_at") @db.Timestamptz
+
+  student User @relation("HealthDataOwner", fields: [studentId], references: [id], onDelete: Cascade)
+  reader  User @relation("HealthDataReader", fields: [readerId], references: [id], onDelete: Cascade)
+
+  @@index([studentId, readAt])
+  @@map("health_data_access_log")
+}
+
+// =====================================================================
+// messaging
+// =====================================================================
+
+// Uma conversa por vínculo. Vínculo encerrado deixa a conversa somente leitura (409 LINK_NOT_ACTIVE).
+model Conversation {
+  id            String    @id @db.Uuid
+  linkId        String    @unique @map("link_id") @db.Uuid
+  trainerId     String    @map("trainer_id") @db.Uuid
+  studentId     String    @map("student_id") @db.Uuid
+  createdAt     DateTime  @map("created_at") @db.Timestamptz
+  lastMessageAt DateTime? @map("last_message_at") @db.Timestamptz
+
+  link     Link      @relation(fields: [linkId], references: [id], onDelete: Restrict)
+  trainer  User      @relation("ConversationTrainer", fields: [trainerId], references: [id], onDelete: Restrict)
+  student  User      @relation("ConversationStudent", fields: [studentId], references: [id], onDelete: Restrict)
+  messages Message[]
+
+  @@index([trainerId, lastMessageAt])
+  @@index([studentId, lastMessageAt])
+  @@map("conversations")
+}
+
+// O id é o messageId gerado no cliente (UUID v7), que também serve de chave de idempotência.
+// Texto até 2.000 caracteres; anexo opcional (Sprint 8).
+model Message {
+  id               String    @id @db.Uuid
+  conversationId   String    @map("conversation_id") @db.Uuid
+  senderId         String    @map("sender_id") @db.Uuid
+  text             String?
+  attachmentFileId String?   @map("attachment_file_id") @db.Uuid
+  sentAt           DateTime  @map("sent_at") @db.Timestamptz
+  readAt           DateTime? @map("read_at") @db.Timestamptz
+
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender         User         @relation(fields: [senderId], references: [id], onDelete: Restrict)
+  attachmentFile StoredFile?  @relation(fields: [attachmentFileId], references: [id], onDelete: SetNull)
+
+  @@index([conversationId, sentAt])
+  @@map("messages")
+}
+
+// =====================================================================
+// notifications
+// =====================================================================
+
+// REST_FINISHED não aparece aqui: é gerada no aparelho, não pela API.
+enum NotificationType {
+  NEW_MESOCYCLE
+  TRAINER_MESSAGE
+  WORKOUT_REMINDER
+  WEEK_COMPLETED
+  STREAK_AT_RISK
+  BADGE_UNLOCKED
+  STREAK_BROKEN
+  STUDENT_MESSAGE
+  STUDENT_HIGH_RPE
+  STUDENT_PAIN_REPORTED
+}
+
+// target diz ao cliente para qual tela navegar ({ screen, params }).
+model Notification {
+  id        String           @id @db.Uuid
+  userId    String           @map("user_id") @db.Uuid
+  type      NotificationType
+  title     String
+  body      String?
+  target    Json
+  createdAt DateTime         @map("created_at") @db.Timestamptz
+  readAt    DateTime?        @map("read_at") @db.Timestamptz
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, readAt, createdAt])
+  @@map("notifications")
+}
+
+// =====================================================================
+// files
+// =====================================================================
+
+enum FilePurpose {
+  EXERCISE_MEDIA // JPG, PNG ou MP4, até 10 MB
+  STUDENT_DOCUMENT // PDF, até 10 MB
+}
+
+enum FileStatus {
+  PENDING // URL de envio emitida, bytes ainda não confirmados
+  READY // POST /files/{id}/complete conferiu tipo e tamanho reais
+}
+
+// Metadados do objeto no armazenamento S3-compatível; os bytes nunca passam pela API.
+model StoredFile {
+  id          String      @id @db.Uuid
+  ownerId     String      @map("owner_id") @db.Uuid
+  purpose     FilePurpose
+  status      FileStatus  @default(PENDING)
+  storageKey  String      @unique @map("storage_key")
+  fileName    String      @map("file_name")
+  contentType String      @map("content_type")
+  sizeBytes   Int         @map("size_bytes")
+  createdAt   DateTime    @map("created_at") @db.Timestamptz
+  completedAt DateTime?   @map("completed_at") @db.Timestamptz
+  deletedAt   DateTime?   @map("deleted_at") @db.Timestamptz
+
+  owner           User               @relation(fields: [ownerId], references: [id], onDelete: Restrict)
+  exercises       Exercise[]
+  attachment      StudentAttachment?
+  messageAttached Message[]
+
+  @@index([ownerId, createdAt])
+  @@map("files")
+}
+
+// Arquivo que o treinador anexou ao aluno. shared = o aluno também vê e baixa.
+model StudentAttachment {
+  id        String   @id @db.Uuid
+  fileId    String   @unique @map("file_id") @db.Uuid
+  studentId String   @map("student_id") @db.Uuid
+  trainerId String   @map("trainer_id") @db.Uuid
+  title     String
+  shared    Boolean  @default(false)
+  createdAt DateTime @map("created_at") @db.Timestamptz
+  updatedAt DateTime @map("updated_at") @db.Timestamptz
+
+  file    StoredFile @relation(fields: [fileId], references: [id], onDelete: Cascade)
+  student User       @relation("AttachmentStudent", fields: [studentId], references: [id], onDelete: Cascade)
+  trainer User       @relation("AttachmentTrainer", fields: [trainerId], references: [id], onDelete: Cascade)
+
+  @@index([studentId, shared, createdAt])
+  @@map("student_attachments")
 }
 
 // =====================================================================
