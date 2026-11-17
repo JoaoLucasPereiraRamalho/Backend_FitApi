@@ -66,6 +66,12 @@ model User {
   mesocyclesPrescribed Mesocycle[]           @relation("MesocycleStudent")
   templates            Template[]
 
+  executedSessions  ExecutedSession[]
+  syncedMutations   SyncedMutation[]
+  weekProgress      WeekProgress[]
+  badges            StudentBadge[]
+  loadConfirmations LoadConfirmation[]
+
   @@map("users")
 }
 
@@ -296,12 +302,15 @@ model Exercise {
   updatedAt      DateTime  @map("updated_at") @db.Timestamptz
   deletedAt      DateTime? @map("deleted_at") @db.Timestamptz
 
-  owner           User?                 @relation(fields: [ownerId], references: [id], onDelete: Restrict)
-  muscleGroup     MuscleGroup           @relation(fields: [muscleGroupKey], references: [key], onDelete: Restrict)
-  equipment       Equipment             @relation(fields: [equipmentKey], references: [key], onDelete: Restrict)
-  alternatives    ExerciseAlternative[] @relation("AlternativeOf")
-  alternativeTo   ExerciseAlternative[] @relation("AlternativeExercise")
-  prescribedItems PrescribedItem[]
+  owner             User?                 @relation(fields: [ownerId], references: [id], onDelete: Restrict)
+  muscleGroup       MuscleGroup           @relation(fields: [muscleGroupKey], references: [key], onDelete: Restrict)
+  equipment         Equipment             @relation(fields: [equipmentKey], references: [key], onDelete: Restrict)
+  alternatives      ExerciseAlternative[] @relation("AlternativeOf")
+  alternativeTo     ExerciseAlternative[] @relation("AlternativeExercise")
+  prescribedItems   PrescribedItem[]
+  executedSets      ExecutedSet[]
+  substitutions     ExecutedItem[]
+  loadConfirmations LoadConfirmation[]
 
   @@index([ownerId, name])
   @@index([muscleGroupKey])
@@ -377,8 +386,9 @@ model PrescribedSession {
   subtitle    String?
   position    Int // ordem na rotação (order na API)
 
-  mesocycle Mesocycle        @relation(fields: [mesocycleId], references: [id], onDelete: Cascade)
-  items     PrescribedItem[]
+  mesocycle  Mesocycle         @relation(fields: [mesocycleId], references: [id], onDelete: Cascade)
+  items      PrescribedItem[]
+  executions ExecutedSession[]
 
   @@unique([mesocycleId, position])
   @@map("prescribed_sessions")
@@ -400,8 +410,10 @@ model PrescribedItem {
   groupKey    String?        @map("group_key") // liga itens consecutivos do mesmo bloco
   groupType   ItemGroupType? @map("group_type")
 
-  session  PrescribedSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
-  exercise Exercise          @relation(fields: [exerciseId], references: [id], onDelete: Restrict)
+  session       PrescribedSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  exercise      Exercise          @relation(fields: [exerciseId], references: [id], onDelete: Restrict)
+  executedSets  ExecutedSet[]
+  executedItems ExecutedItem[]
 
   @@unique([sessionId, position])
   @@index([exerciseId])
@@ -424,6 +436,235 @@ model Template {
 
   @@index([trainerId, createdAt])
   @@map("templates")
+}
+
+// =====================================================================
+// execution
+// =====================================================================
+
+enum ExecutedSessionStatus {
+  IN_PROGRESS
+  FINISHED
+}
+
+enum SessionClosedBy {
+  STUDENT
+  SYSTEM // encerrada pelo servidor após inatividade (sessionAutoCloseInactivityHours)
+}
+
+// Sessão executada. O id vem do aparelho (sessionId da mutação SESSION_START, UUID v7).
+// Aponta para a sessão prescrita por FK e nunca copia a ficha (RN05). localDate é o dia, no fuso
+// do aluno gravado em timezone, em que a sessão começou (ERS 5.5); o instante é startedAt.
+// Totais e o resultado para a gamificação são calculados no servidor ao finalizar.
+// Uma IN_PROGRESS por aluno: índice parcial em SQL na migração.
+model ExecutedSession {
+  id                     String                @id @db.Uuid
+  studentId              String                @map("student_id") @db.Uuid
+  prescribedSessionId    String                @map("prescribed_session_id") @db.Uuid
+  status                 ExecutedSessionStatus @default(IN_PROGRESS)
+  startedAt              DateTime              @map("started_at") @db.Timestamptz
+  lastActivityAt         DateTime              @map("last_activity_at") @db.Timestamptz
+  finishedAt             DateTime?             @map("finished_at") @db.Timestamptz
+  closedBy               SessionClosedBy?      @map("closed_by")
+  timezone               String
+  localDate              DateTime              @map("local_date") @db.Date
+  rpe                    Int?
+  durationSeconds        Int?                  @map("duration_seconds")
+  volumeKg               Decimal?              @map("volume_kg") @db.Decimal(10, 2)
+  completedSets          Int?                  @map("completed_sets")
+  prescribedSets         Int?                  @map("prescribed_sets")
+  countedForGamification Boolean?              @map("counted_for_gamification")
+  notCountedReason       String?               @map("not_counted_reason") // LESS_THAN_50_PERCENT_SETS, SHORTER_THAN_15_MINUTES
+  createdAt              DateTime              @map("created_at") @db.Timestamptz
+  updatedAt              DateTime              @map("updated_at") @db.Timestamptz
+  deletedAt              DateTime?             @map("deleted_at") @db.Timestamptz // SESSION_DELETE dentro da janela de edição
+
+  student           User              @relation(fields: [studentId], references: [id], onDelete: Restrict)
+  prescribedSession PrescribedSession @relation(fields: [prescribedSessionId], references: [id], onDelete: Restrict)
+  items             ExecutedItem[]
+  sets              ExecutedSet[]
+  badgesUnlocked    StudentBadge[]
+
+  @@map("executed_sessions")
+}
+
+// O que o aluno fez com um exercício da ficha além das séries: pulou, trocou por uma alternativa
+// aprovada ou deixou observação. O status DONE/PARTIAL é derivado das séries.
+model ExecutedItem {
+  id                   String   @id @db.Uuid
+  sessionId            String   @map("session_id") @db.Uuid
+  prescribedItemId     String   @map("prescribed_item_id") @db.Uuid
+  skipped              Boolean  @default(false)
+  substituteExerciseId String?  @map("substitute_exercise_id") @db.Uuid
+  note                 String?
+  updatedAt            DateTime @map("updated_at") @db.Timestamptz
+
+  session            ExecutedSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  prescribedItem     PrescribedItem  @relation(fields: [prescribedItemId], references: [id], onDelete: Restrict)
+  substituteExercise Exercise?       @relation(fields: [substituteExerciseId], references: [id], onDelete: Restrict)
+
+  @@unique([sessionId, prescribedItemId])
+  @@map("executed_items")
+}
+
+// Série executada. O id vem do aparelho (setId de SET_UPSERT). exerciseId é o exercício feito de
+// fato (o substituto, quando houve troca). Carga em kg.
+model ExecutedSet {
+  id                String   @id @db.Uuid
+  sessionId         String   @map("session_id") @db.Uuid
+  prescribedItemId  String   @map("prescribed_item_id") @db.Uuid
+  exerciseId        String   @map("exercise_id") @db.Uuid
+  setNumber         Int      @map("set_number")
+  loadKg            Decimal  @map("load_kg") @db.Decimal(6, 2)
+  reps              Int
+  actualRestSeconds Int?     @map("actual_rest_seconds")
+  isExtra           Boolean  @default(false) @map("is_extra")
+  completedAt       DateTime @map("completed_at") @db.Timestamptz
+  createdAt         DateTime @map("created_at") @db.Timestamptz
+  updatedAt         DateTime @map("updated_at") @db.Timestamptz
+
+  session          ExecutedSession   @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  prescribedItem   PrescribedItem    @relation(fields: [prescribedItemId], references: [id], onDelete: Restrict)
+  exercise         Exercise          @relation(fields: [exerciseId], references: [id], onDelete: Restrict)
+  loadConfirmation LoadConfirmation?
+
+  @@index([sessionId, prescribedItemId, setNumber])
+  @@index([exerciseId, completedAt])
+  @@map("executed_sets")
+}
+
+enum MutationType {
+  SESSION_START
+  SET_UPSERT
+  SET_DELETE
+  EXERCISE_NOTE
+  EXERCISE_SUBSTITUTE
+  EXERCISE_SKIP
+  SESSION_FINISH
+  SESSION_DELETE
+  BODY_MEASUREMENT_ADD
+  MESSAGE_SEND
+}
+
+enum MutationResult {
+  APPLIED
+  REJECTED
+}
+
+// Chave de idempotência do /sync/push: uma linha por clientMutationId já processado. Reenviar a
+// mesma mutação encontra a linha e responde DUPLICATE sem gravar de novo. DEFERRED não é gravado,
+// porque a mutação volta depois.
+model SyncedMutation {
+  clientMutationId String         @id @map("client_mutation_id") @db.Uuid
+  userId           String         @map("user_id") @db.Uuid
+  deviceId         String         @map("device_id") @db.Uuid // id do aparelho enviado no lote
+  type             MutationType
+  result           MutationResult
+  errorCode        String?        @map("error_code")
+  occurredAt       DateTime       @map("occurred_at") @db.Timestamptz
+  receivedAt       DateTime       @map("received_at") @db.Timestamptz
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, receivedAt])
+  @@map("synced_mutations")
+}
+
+// =====================================================================
+// gamification
+// =====================================================================
+
+// Semana (segunda a domingo) no fuso do aluno, única por aluno e início da semana. goalDays guarda
+// a meta vigente quando a semana começou, para que mudar a configuração não reescreva o passado.
+// completedAt: quando o aluno atingiu a meta; closedAt: quando o worker fechou a semana.
+model WeekProgress {
+  id          String    @id @db.Uuid
+  studentId   String    @map("student_id") @db.Uuid
+  weekStart   DateTime  @map("week_start") @db.Date
+  timezone    String
+  trainedDays Int       @default(0) @map("trained_days")
+  goalDays    Int       @map("goal_days")
+  completedAt DateTime? @map("completed_at") @db.Timestamptz
+  closedAt    DateTime? @map("closed_at") @db.Timestamptz
+  updatedAt   DateTime  @map("updated_at") @db.Timestamptz
+
+  student User @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@unique([studentId, weekStart])
+  @@map("week_progress")
+}
+
+enum BadgeCategory {
+  CONSISTENCY
+  VOLUME
+  STRENGTH
+}
+
+// Catálogo da ERS 5.4. criterion descreve a regra (tipo e parâmetros, ex.: semanas consecutivas,
+// volume acumulado, carga mínima num exercício base por badgeKey); o seed preenche.
+model Badge {
+  key         String        @id // ex.: IRON_ROUTINE
+  name        String
+  description String
+  category    BadgeCategory
+  icon        String
+  criterion   Json
+  sortOrder   Int           @map("sort_order")
+
+  awards StudentBadge[]
+
+  @@map("badges")
+}
+
+enum BadgeOriginType {
+  SESSION
+  WEEK
+}
+
+// Badge conquistado. Único por aluno e badge e nunca removido (RN09).
+model StudentBadge {
+  id              String          @id @db.Uuid
+  studentId       String          @map("student_id") @db.Uuid
+  badgeKey        String          @map("badge_key")
+  unlockedAt      DateTime        @map("unlocked_at") @db.Timestamptz
+  originType      BadgeOriginType @map("origin_type")
+  originSessionId String?         @map("origin_session_id") @db.Uuid
+  originWeekStart DateTime?       @map("origin_week_start") @db.Date
+
+  student       User             @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  badge         Badge            @relation(fields: [badgeKey], references: [key], onDelete: Restrict)
+  originSession ExecutedSession? @relation(fields: [originSessionId], references: [id], onDelete: SetNull)
+
+  @@unique([studentId, badgeKey])
+  @@index([studentId, unlockedAt])
+  @@map("student_badges")
+}
+
+enum LoadConfirmationStatus {
+  PENDING
+  CONFIRMED
+  REJECTED
+}
+
+// Carga mais de 50% acima do melhor registro anterior fica pendente para os badges de força até o
+// aluno confirmar (ERS 5.4). Rejeitar só descarta para a gamificação; a série continua no histórico.
+model LoadConfirmation {
+  id             String                 @id @db.Uuid
+  studentId      String                 @map("student_id") @db.Uuid
+  setId          String                 @unique @map("set_id") @db.Uuid
+  exerciseId     String                 @map("exercise_id") @db.Uuid
+  loadKg         Decimal                @map("load_kg") @db.Decimal(6, 2)
+  previousBestKg Decimal                @map("previous_best_kg") @db.Decimal(6, 2)
+  status         LoadConfirmationStatus @default(PENDING)
+  createdAt      DateTime               @map("created_at") @db.Timestamptz
+  resolvedAt     DateTime?              @map("resolved_at") @db.Timestamptz
+
+  student  User        @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  set      ExecutedSet @relation(fields: [setId], references: [id], onDelete: Cascade)
+  exercise Exercise    @relation(fields: [exerciseId], references: [id], onDelete: Restrict)
+
+  @@index([studentId, status])
+  @@map("load_confirmations")
 }
 
 // =====================================================================
