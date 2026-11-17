@@ -1,0 +1,20 @@
+# Homologação no Render. O deploy é disparado pelo workflow deploy-staging.yml
+# depois do CI verde na master, já com as migrações aplicadas.
+services:
+  - type: web
+    name: fittrack-api-staging
+    runtime: docker
+    plan: free
+    region: virginia
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /v1/health
+    autoDeployTrigger: 'off'
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PROCESS_ROLE
+        value: api
+      - key: LOG_LEVEL
+        value: info
+      - key: DATABASE_URL
+        sync: false

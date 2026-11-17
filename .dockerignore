@@ -1,0 +1,24 @@
+# Dependências e saídas locais (a imagem instala e compila do zero)
+node_modules
+dist
+coverage
+src/generated
+*.tsbuildinfo
+
+# Segredos e configuração local
+.env
+.env.*
+!.env.example
+
+# Fora da imagem
+.git
+.github
+.vscode
+.idea
+docs
+test
+*.md
+docker-compose.yml
+Dockerfile
+.dockerignore
+*.log

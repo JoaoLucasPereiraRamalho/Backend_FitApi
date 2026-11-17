@@ -61,6 +61,43 @@ Os fronts escolhem a API por variável de ambiente; nenhum código muda entre lo
 
 A API escuta em `0.0.0.0`, então aparelhos na mesma rede alcançam a máquina de desenvolvimento pelo IP local.
 
+## Homologação
+
+A API roda no Render como serviço web Docker (`render.yaml`), com a mesma imagem do `Dockerfile`. A imagem sobe a API ou o worker conforme `PROCESS_ROLE` (`api` ou `worker`), roda com usuário sem privilégio e define `NODE_ENV=production`.
+
+### Fluxo de publicação
+
+1. Merge na `master` dispara o CI.
+2. Com o CI verde, o workflow `Deploy staging` aplica as migrações pendentes (`prisma migrate deploy`) no banco de homologação.
+3. O workflow chama o deploy hook do Render com o commit exato que passou no CI.
+4. O workflow espera `GET /v1/health` responder `200` em homologação.
+
+O auto-deploy do Render fica desligado para que nada seja publicado sem CI verde e migrações aplicadas.
+
+### Configuração inicial (uma vez)
+
+1. **Banco:** crie um PostgreSQL gerenciado e guarde a URL de conexão direta (sem pooler; o `prisma migrate` precisa dela). O Postgres gratuito do Render expira 30 dias após a criação; para homologação de longo prazo, use um plano pago ou um provedor com plano gratuito sem expiração.
+2. **Render:** em New > Blueprint, conecte este repositório. O Render lê o `render.yaml` e pede o valor de `DATABASE_URL`. Depois, copie a URL do deploy hook em Settings > Deploy Hook.
+3. **GitHub:** em Settings > Environments, crie o ambiente `staging` com:
+
+   | Tipo     | Nome                     | Valor                                                                         |
+   | -------- | ------------------------ | ----------------------------------------------------------------------------- |
+   | Secret   | `STAGING_DATABASE_URL`   | URL de conexão direta do banco de homologação                                 |
+   | Secret   | `RENDER_DEPLOY_HOOK_URL` | URL do deploy hook do serviço no Render                                       |
+   | Variable | `STAGING_API_URL`        | URL pública da API com `/v1`, por exemplo `https://<serviço>.onrender.com/v1` |
+
+O plano gratuito do Render hiberna o serviço após 15 minutos sem tráfego; a primeira requisição depois disso leva cerca de um minuto. O worker não está no `render.yaml` porque o Render não oferece workers no plano gratuito e ainda não há jobs; ele entra quando os primeiros jobs forem implementados.
+
+### Rodar a imagem localmente
+
+```bash
+docker build -t fittrack-api .
+docker run --rm -p 3000:3000 --env-file .env -e PROCESS_ROLE=api fittrack-api
+docker run --rm --env-file .env -e PROCESS_ROLE=worker fittrack-api
+```
+
+Dentro do contêiner, `localhost` é o próprio contêiner: para usar o Postgres do `docker-compose.yml`, troque o host da `DATABASE_URL` por `host.docker.internal`.
+
 ## Variáveis de ambiente
 
 Validadas no início do processo (`src/platform/config/env.schema.ts`): valor ausente ou inválido impede a API e o worker de subir, com a lista dos problemas. Os valores locais estão em `.env.example`.
