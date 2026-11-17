@@ -51,12 +51,14 @@ Os dados ficam nos volumes `postgres-data` e `storage-data`. `pnpm env:down` par
 
 | Script                          | O que faz                                                                        |
 | ------------------------------- | -------------------------------------------------------------------------------- |
-| `pnpm db:migrate`               | Aplica as migrações pendentes; com o schema alterado, cria a próxima migração    |
+| `pnpm db:migrate`               | Aplica as migrações pendentes, cria a próxima se o schema mudou e gera o cliente |
 | `pnpm db:migrate --name <nome>` | Cria a migração com o nome dado                                                  |
 | `pnpm db:seed`                  | Grava os dados iniciais (idempotente: rodar de novo não duplica)                 |
 | `pnpm db:reset`                 | Apaga a base local, reaplica todas as migrações e roda o seed (pede confirmação) |
 
 Todo instante é `timestamptz` e as chaves primárias são UUID v7 geradas pelo `IdGenerator`, nunca pelo banco; `test/architecture/prisma-schema.spec.ts` confere as duas regras. A conexão fixa a sessão em UTC (`src/platform/database/pg-adapter.ts`): o adapter do Prisma envia e lê instantes sem offset, e um servidor com outro fuso deslocaria todos os horários.
+
+O Prisma não declara índices parciais nem restrições `CHECK`; quando uma regra precisa deles (como o único vínculo ativo por aluno, `links_one_active_per_student`), crie a migração com `pnpm db:migrate --create-only --name <nome>`, acrescente o SQL ao fim do `migration.sql` e aplique com `pnpm db:migrate`. O Prisma não tenta removê-los nas migrações seguintes. Cada regra assim tem teste em `test/integration/`.
 
 Transações abrem só no caso de uso, por `UnitOfWork.run(tx => ...)`; os repositórios recebem o `tx`.
 

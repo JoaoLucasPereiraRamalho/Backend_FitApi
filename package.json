@@ -22,7 +22,7 @@
     "test:watch": "vitest",
     "test:cov": "vitest run --coverage",
     "prisma:generate": "prisma generate",
-    "db:migrate": "prisma migrate dev",
+    "db:migrate": "prisma migrate dev && prisma generate",
     "db:seed": "prisma db seed",
     "db:reset": "prisma migrate reset && prisma db seed",
     "postinstall": "prisma generate",

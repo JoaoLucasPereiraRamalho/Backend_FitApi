@@ -45,8 +45,20 @@ model User {
   updatedAt       DateTime  @map("updated_at") @db.Timestamptz
   deletedAt       DateTime? @map("deleted_at") @db.Timestamptz // exclusão LGPD (anonimização)
 
+  // Bloqueio após falhas seguidas de login (423 ACCOUNT_LOCKED); o limite vem da configuração.
+  failedLoginCount Int       @default(0) @map("failed_login_count")
+  lockedUntil      DateTime? @map("locked_until") @db.Timestamptz
+
   trainerProfile TrainerProfile?
   studentProfile StudentProfile?
+  loginSessions  LoginSession[]
+  devices        Device[]
+  consents       Consent[]
+
+  invitesCreated Invite[] @relation("InviteTrainer")
+  invitesUsed    Invite[] @relation("InviteStudent")
+  trainerLinks   Link[]   @relation("LinkTrainer")
+  studentLinks   Link[]   @relation("LinkStudent")
 
   @@map("users")
 }
@@ -74,6 +86,91 @@ model StudentProfile {
   @@map("student_profiles")
 }
 
+enum ClientKind {
+  WEB
+  MOBILE
+}
+
+// Uma sessão de login é uma família de refresh tokens: cada refresh rotaciona o token dentro da
+// mesma sessão. Reusar um token já rotacionado revoga a sessão inteira (401 REFRESH_REUSED).
+model LoginSession {
+  id           String     @id @db.Uuid
+  userId       String     @map("user_id") @db.Uuid
+  client       ClientKind
+  userAgent    String?    @map("user_agent")
+  createdAt    DateTime   @map("created_at") @db.Timestamptz
+  lastUsedAt   DateTime   @map("last_used_at") @db.Timestamptz
+  expiresAt    DateTime   @map("expires_at") @db.Timestamptz
+  revokedAt    DateTime?  @map("revoked_at") @db.Timestamptz
+  revokeReason String?    @map("revoke_reason") // LOGOUT, LOGOUT_ALL, REUSE, PASSWORD_RESET, ACCOUNT_DELETED
+
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  refreshTokens RefreshToken[]
+
+  @@index([userId, revokedAt])
+  @@map("login_sessions")
+}
+
+// Só o hash do token é guardado. usedAt preenchido = já rotacionado.
+model RefreshToken {
+  id        String    @id @db.Uuid
+  sessionId String    @map("session_id") @db.Uuid
+  tokenHash String    @unique @map("token_hash")
+  createdAt DateTime  @map("created_at") @db.Timestamptz
+  expiresAt DateTime  @map("expires_at") @db.Timestamptz
+  usedAt    DateTime? @map("used_at") @db.Timestamptz
+
+  session LoginSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId])
+  @@map("refresh_tokens")
+}
+
+enum DevicePlatform {
+  ANDROID
+  IOS
+}
+
+// Aparelho com token de push. O token é único: se outra conta entrar no mesmo aparelho, a linha
+// muda de dono em vez de duplicar.
+model Device {
+  id         String         @id @db.Uuid
+  userId     String         @map("user_id") @db.Uuid
+  pushToken  String         @unique @map("push_token")
+  platform   DevicePlatform
+  appVersion String         @map("app_version")
+  createdAt  DateTime       @map("created_at") @db.Timestamptz
+  lastSeenAt DateTime       @map("last_seen_at") @db.Timestamptz
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("devices")
+}
+
+enum ConsentType {
+  TERMS_OF_USE
+  PRIVACY_POLICY
+  HEALTH_DATA
+  COMMUNICATION
+}
+
+// Histórico de aceites (LGPD): uma linha por aceite ou revogação de uma versão do documento.
+// Nova versão da política gera nova linha; nenhuma linha é alterada além de revokedAt.
+model Consent {
+  id        String      @id @db.Uuid
+  userId    String      @map("user_id") @db.Uuid
+  type      ConsentType
+  version   String
+  grantedAt DateTime    @map("granted_at") @db.Timestamptz
+  revokedAt DateTime?   @map("revoked_at") @db.Timestamptz
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, type, grantedAt])
+  @@map("consents")
+}
+
 // Parâmetros de negócio que a ERS pede que não fiquem fixos no código (exposto em GET /config).
 // Lido pela interface pública de identity (SystemSettings).
 model SystemSetting {
@@ -85,16 +182,83 @@ model SystemSetting {
 }
 
 // =====================================================================
+// linking
+// =====================================================================
+
+// PENDING passado de expiresAt é tratado como expirado pelo caso de uso mesmo antes de ser
+// marcado EXPIRED; a expiração vem de system_settings (inviteExpiresInDays).
+enum InviteStatus {
+  PENDING
+  USED
+  EXPIRED
+  REVOKED
+}
+
+model Invite {
+  id           String       @id @db.Uuid
+  trainerId    String       @map("trainer_id") @db.Uuid
+  code         String       @unique // código curto digitado no app, ex.: TJ-9812
+  tokenHash    String       @unique @map("token_hash") // hash do token do link; o token nunca é guardado
+  invitedEmail String?      @map("invited_email")
+  status       InviteStatus @default(PENDING)
+  expiresAt    DateTime     @map("expires_at") @db.Timestamptz
+  createdAt    DateTime     @map("created_at") @db.Timestamptz
+  usedAt       DateTime?    @map("used_at") @db.Timestamptz
+  usedById     String?      @map("used_by_id") @db.Uuid
+  revokedAt    DateTime?    @map("revoked_at") @db.Timestamptz
+
+  trainer User  @relation("InviteTrainer", fields: [trainerId], references: [id], onDelete: Cascade)
+  usedBy  User? @relation("InviteStudent", fields: [usedById], references: [id], onDelete: SetNull)
+  link    Link?
+
+  @@index([trainerId, status, createdAt])
+  @@map("invites")
+}
+
+enum LinkStatus {
+  ACTIVE
+  ENDED
+}
+
+enum LinkEndedBy {
+  TRAINER
+  STUDENT
+  SYSTEM
+}
+
+// Vínculo treinador-aluno. Encerrar muda o status e mantém a linha (RN02: o histórico fica).
+// Um aluno tem no máximo um vínculo ACTIVE: índice único parcial links_one_active_per_student,
+// criado em SQL na migração porque o Prisma não declara índices parciais.
+model Link {
+  id        String       @id @db.Uuid
+  trainerId String       @map("trainer_id") @db.Uuid
+  studentId String       @map("student_id") @db.Uuid
+  inviteId  String?      @unique @map("invite_id") @db.Uuid
+  status    LinkStatus   @default(ACTIVE)
+  startedAt DateTime     @map("started_at") @db.Timestamptz
+  endedAt   DateTime?    @map("ended_at") @db.Timestamptz
+  endedBy   LinkEndedBy? @map("ended_by")
+
+  trainer User    @relation("LinkTrainer", fields: [trainerId], references: [id], onDelete: Restrict)
+  student User    @relation("LinkStudent", fields: [studentId], references: [id], onDelete: Restrict)
+  invite  Invite? @relation(fields: [inviteId], references: [id], onDelete: SetNull)
+
+  @@index([trainerId, status])
+  @@index([studentId, startedAt])
+  @@map("links")
+}
+
+// =====================================================================
 // platform (outbox de eventos de domínio, entregue pelo worker via pg-boss)
 // =====================================================================
 
 model OutboxEvent {
-  id            String    @id @db.Uuid
-  type          String
-  payload       Json // só ids e fatos, nunca entidades inteiras
-  occurredAt    DateTime  @map("occurred_at") @db.Timestamptz
-  dispatchedAt  DateTime? @map("dispatched_at") @db.Timestamptz
-  attempts      Int       @default(0)
+  id           String    @id @db.Uuid
+  type         String
+  payload      Json // só ids e fatos, nunca entidades inteiras
+  occurredAt   DateTime  @map("occurred_at") @db.Timestamptz
+  dispatchedAt DateTime? @map("dispatched_at") @db.Timestamptz
+  attempts     Int       @default(0)
 
   @@index([dispatchedAt, occurredAt])
   @@map("outbox_events")
