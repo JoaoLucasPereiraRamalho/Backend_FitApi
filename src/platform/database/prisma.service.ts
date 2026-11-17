@@ -1,7 +1,7 @@
 import { Inject, Injectable, type OnModuleDestroy, type OnModuleInit } from '@nestjs/common';
-import { PrismaPg } from '@prisma/adapter-pg';
 import { PrismaClient } from '../../generated/prisma/client.js';
 import { APP_CONFIG, type AppConfig } from '../config/index.js';
+import { createPgAdapter } from './pg-adapter.js';
 
 /**
  * Cliente Prisma único do processo. Só repositórios (infraestrutura) e o UnitOfWork usam;
@@ -10,7 +10,7 @@ import { APP_CONFIG, type AppConfig } from '../config/index.js';
 @Injectable()
 export class PrismaService extends PrismaClient implements OnModuleInit, OnModuleDestroy {
   constructor(@Inject(APP_CONFIG) config: AppConfig) {
-    super({ adapter: new PrismaPg({ connectionString: config.databaseUrl }) });
+    super({ adapter: createPgAdapter(config.databaseUrl) });
   }
 
   async onModuleInit(): Promise<void> {

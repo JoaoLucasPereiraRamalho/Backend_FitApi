@@ -27,7 +27,7 @@ corepack enable
 pnpm install                    # também gera o cliente Prisma
 cp .env.example .env
 pnpm dev                        # http://localhost:3000/v1/health
-pnpm prisma:seed                # em outro terminal, com a API no ar
+pnpm db:seed                    # em outro terminal, com a API no ar
 ```
 
 `pnpm dev` sobe o PostgreSQL e o MinIO do `docker-compose.yml` (esperando o banco ficar saudável), aplica as migrações pendentes com `prisma migrate deploy` e inicia a API com recarga automática. Nas próximas vezes, basta `pnpm dev`.
@@ -47,7 +47,31 @@ No Windows com WSL 2, ative a integração com a sua distribuição em Docker De
 
 Os dados ficam nos volumes `postgres-data` e `storage-data`. `pnpm env:down` para os contêineres e mantém os dados; `docker compose down -v` apaga os volumes para recomeçar do zero.
 
-Para criar uma migração nova durante o desenvolvimento, use `pnpm prisma:migrate --name <nome>`.
+### Banco de dados
+
+| Script                          | O que faz                                                                        |
+| ------------------------------- | -------------------------------------------------------------------------------- |
+| `pnpm db:migrate`               | Aplica as migrações pendentes; com o schema alterado, cria a próxima migração    |
+| `pnpm db:migrate --name <nome>` | Cria a migração com o nome dado                                                  |
+| `pnpm db:seed`                  | Grava os dados iniciais (idempotente: rodar de novo não duplica)                 |
+| `pnpm db:reset`                 | Apaga a base local, reaplica todas as migrações e roda o seed (pede confirmação) |
+
+Todo instante é `timestamptz` e as chaves primárias são UUID v7 geradas pelo `IdGenerator`, nunca pelo banco; `test/architecture/prisma-schema.spec.ts` confere as duas regras. A conexão fixa a sessão em UTC (`src/platform/database/pg-adapter.ts`): o adapter do Prisma envia e lê instantes sem offset, e um servidor com outro fuso deslocaria todos os horários.
+
+Transações abrem só no caso de uso, por `UnitOfWork.run(tx => ...)`; os repositórios recebem o `tx`.
+
+### Testes de integração
+
+Rodam contra um PostgreSQL de verdade, com as migrações aplicadas, na base de `DATABASE_URL`. Use uma base separada da de desenvolvimento:
+
+```bash
+docker compose exec postgres createdb -U fittrack fittrack_test
+export DATABASE_URL=postgresql://fittrack:fittrack@localhost:5432/fittrack_test?schema=public
+pnpm prisma migrate deploy
+pnpm test:integration
+```
+
+No CI, o job `integration` sobe um Postgres 17 como serviço e roda os mesmos passos.
 
 ### Web e mobile apontando para esta API
 
@@ -121,9 +145,10 @@ Em `development` os logs saem formatados (pino-pretty); nos demais ambientes, em
 | `pnpm env:up` / `pnpm env:down`            | Sobe ou para o PostgreSQL e o MinIO do `docker-compose.yml`             |
 | `pnpm build`                               | Compila para `dist/`                                                    |
 | `pnpm start:api` / `pnpm start:worker`     | Roda a versão compilada                                                 |
-| `pnpm test` / `test:watch` / `test:cov`    | Testes (Vitest)                                                         |
+| `pnpm test` / `test:watch` / `test:cov`    | Testes (Vitest), sem banco                                              |
+| `pnpm test:integration`                    | Testes de integração contra o PostgreSQL de `DATABASE_URL`              |
 | `pnpm lint` / `pnpm typecheck`             | ESLint e TypeScript                                                     |
-| `pnpm prisma:migrate` / `pnpm prisma:seed` | Migrações e dados iniciais                                              |
+| `pnpm db:migrate` / `db:seed` / `db:reset` | Migrações, dados iniciais e recriação da base local                     |
 
 ## Estrutura
 
