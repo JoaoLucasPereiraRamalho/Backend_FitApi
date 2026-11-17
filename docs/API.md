@@ -600,6 +600,8 @@ O app grava tudo primeiro no SQLite local e envia **mutações** em lote. Cada m
 
 O mesmo conteúdo pode ser enviado em endpoints REST isolados no futuro, mas **na versão 1 a escrita da execução acontece somente por `/sync/push`**, tanto online quanto offline, para existir um único caminho a testar.
 
+**Decisão (spike FT-5, `docs/spikes/sync.md`):** fila de mutações própria no app, sem PowerSync. Na versão 1, o app só coloca na fila as mutações da execução do treino; `MESSAGE_SEND` e `BODY_MEASUREMENT_ADD` ficam no contrato, mas mensagens e medidas são enviadas pelos endpoints REST com conexão.
+
 ### `POST /sync/push`
 
 ```json

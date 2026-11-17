@@ -5,10 +5,11 @@ Monólito modular com NestJS (Fastify), Prisma e PostgreSQL; o mesmo código sob
 
 ## Documentos de referência
 
-| Documento                                | Conteúdo                                                                             |
-| ---------------------------------------- | ------------------------------------------------------------------------------------ |
-| [`docs/API.md`](docs/API.md)             | Endpoints, envelopes de resposta, formato de erro e catálogo de códigos              |
-| [`docs/ESTRUTURA.md`](docs/ESTRUTURA.md) | Pastas, módulos, camadas, matriz de dependências e ordem de implementação por sprint |
+| Documento                                    | Conteúdo                                                                             |
+| -------------------------------------------- | ------------------------------------------------------------------------------------ |
+| [`docs/API.md`](docs/API.md)                 | Endpoints, envelopes de resposta, formato de erro e catálogo de códigos              |
+| [`docs/ESTRUTURA.md`](docs/ESTRUTURA.md)     | Pastas, módulos, camadas, matriz de dependências e ordem de implementação por sprint |
+| [`docs/spikes/sync.md`](docs/spikes/sync.md) | Spike de sincronização offline: método, resultados e decisão pela fila própria       |
 
 Mudanças de contrato ou de estrutura são feitas primeiro nesses documentos e depois no código.
 
