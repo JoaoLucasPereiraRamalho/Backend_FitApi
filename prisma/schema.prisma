@@ -60,6 +60,12 @@ model User {
   trainerLinks   Link[]   @relation("LinkTrainer")
   studentLinks   Link[]   @relation("LinkStudent")
 
+  exercises            Exercise[]
+  approvedAlternatives ExerciseAlternative[]
+  mesocyclesOwned      Mesocycle[]           @relation("MesocycleOwner")
+  mesocyclesPrescribed Mesocycle[]           @relation("MesocycleStudent")
+  templates            Template[]
+
   @@map("users")
 }
 
@@ -246,6 +252,178 @@ model Link {
   @@index([trainerId, status])
   @@index([studentId, startedAt])
   @@map("links")
+}
+
+// =====================================================================
+// library
+// =====================================================================
+
+// Catálogos com chave estável (usada pelos clientes e pelos filtros) e rótulo exibido.
+model MuscleGroup {
+  key       String @id // ex.: CHEST
+  label     String
+  sortOrder Int    @map("sort_order")
+
+  exercises Exercise[]
+
+  @@map("muscle_groups")
+}
+
+model Equipment {
+  key       String @id // ex.: BARBELL
+  label     String
+  sortOrder Int    @map("sort_order")
+
+  exercises Exercise[]
+
+  @@map("equipment")
+}
+
+// Dono nulo = exercício base (somente leitura). Personalizados são do treinador ou do aluno
+// autônomo que os criou. Excluir é lógico (deletedAt), porque fichas antigas continuam apontando
+// para o exercício (RN05). Nome único por dono entre os não excluídos e badgeKey só em base:
+// regras em SQL na migração.
+model Exercise {
+  id             String    @id @db.Uuid
+  ownerId        String?   @map("owner_id") @db.Uuid
+  name           String
+  muscleGroupKey String    @map("muscle_group_key")
+  equipmentKey   String    @map("equipment_key")
+  instructions   String[]
+  videoUrl       String?   @map("video_url")
+  badgeKey       String?   @unique @map("badge_key") // RN10: liga o exercício base aos badges de força
+  createdAt      DateTime  @map("created_at") @db.Timestamptz
+  updatedAt      DateTime  @map("updated_at") @db.Timestamptz
+  deletedAt      DateTime? @map("deleted_at") @db.Timestamptz
+
+  owner           User?                 @relation(fields: [ownerId], references: [id], onDelete: Restrict)
+  muscleGroup     MuscleGroup           @relation(fields: [muscleGroupKey], references: [key], onDelete: Restrict)
+  equipment       Equipment             @relation(fields: [equipmentKey], references: [key], onDelete: Restrict)
+  alternatives    ExerciseAlternative[] @relation("AlternativeOf")
+  alternativeTo   ExerciseAlternative[] @relation("AlternativeExercise")
+  prescribedItems PrescribedItem[]
+
+  @@index([ownerId, name])
+  @@index([muscleGroupKey])
+  @@map("exercises")
+}
+
+// Alternativa pré-aprovada para troca na execução. approvedById nulo = alternativa da base
+// (seed); com valor, vale só para os alunos daquele treinador.
+model ExerciseAlternative {
+  id            String   @id @db.Uuid
+  exerciseId    String   @map("exercise_id") @db.Uuid
+  alternativeId String   @map("alternative_id") @db.Uuid
+  approvedById  String?  @map("approved_by_id") @db.Uuid
+  createdAt     DateTime @map("created_at") @db.Timestamptz
+
+  exercise    Exercise @relation("AlternativeOf", fields: [exerciseId], references: [id], onDelete: Cascade)
+  alternative Exercise @relation("AlternativeExercise", fields: [alternativeId], references: [id], onDelete: Cascade)
+  approvedBy  User?    @relation(fields: [approvedById], references: [id], onDelete: Cascade)
+
+  @@index([exerciseId, approvedById])
+  @@map("exercise_alternatives")
+}
+
+// =====================================================================
+// prescription
+// =====================================================================
+
+enum MesocycleStatus {
+  DRAFT
+  ACTIVE
+  ARCHIVED
+}
+
+enum ItemGroupType {
+  BISET
+  SUPERSET
+  CIRCUIT
+}
+
+// A ficha. Um mesociclo ACTIVE nunca é editado no lugar (RN05): alterar é clonar em DRAFT e
+// ativar, o que arquiva o anterior. Um ACTIVE por aluno: índice parcial em SQL na migração.
+// ownerId é o treinador que prescreveu ou o próprio aluno autônomo (RN04).
+model Mesocycle {
+  id           String          @id @db.Uuid
+  ownerId      String          @map("owner_id") @db.Uuid
+  studentId    String          @map("student_id") @db.Uuid
+  clonedFromId String?         @map("cloned_from_id") @db.Uuid
+  name         String
+  focus        String?
+  startsOn     DateTime?       @map("starts_on") @db.Date
+  endsOn       DateTime?       @map("ends_on") @db.Date
+  status       MesocycleStatus @default(DRAFT)
+  createdAt    DateTime        @map("created_at") @db.Timestamptz
+  updatedAt    DateTime        @map("updated_at") @db.Timestamptz
+  activatedAt  DateTime?       @map("activated_at") @db.Timestamptz
+  archivedAt   DateTime?       @map("archived_at") @db.Timestamptz
+
+  owner      User                @relation("MesocycleOwner", fields: [ownerId], references: [id], onDelete: Restrict)
+  student    User                @relation("MesocycleStudent", fields: [studentId], references: [id], onDelete: Restrict)
+  clonedFrom Mesocycle?          @relation("MesocycleClone", fields: [clonedFromId], references: [id], onDelete: SetNull)
+  clones     Mesocycle[]         @relation("MesocycleClone")
+  sessions   PrescribedSession[]
+
+  @@index([studentId, status])
+  @@index([ownerId, status])
+  @@map("mesocycles")
+}
+
+model PrescribedSession {
+  id          String  @id @db.Uuid
+  mesocycleId String  @map("mesocycle_id") @db.Uuid
+  name        String // Treino A, Treino B...
+  subtitle    String?
+  position    Int // ordem na rotação (order na API)
+
+  mesocycle Mesocycle        @relation(fields: [mesocycleId], references: [id], onDelete: Cascade)
+  items     PrescribedItem[]
+
+  @@unique([mesocycleId, position])
+  @@map("prescribed_sessions")
+}
+
+// Limites do RF-W05 (séries 1 a 20, repsMin <= repsMax, descanso 0 a 600 s, cadência de 4
+// caracteres 0-9 ou X, observação até 300) são validados no Zod e repetidos em CHECK na migração.
+model PrescribedItem {
+  id          String         @id @db.Uuid
+  sessionId   String         @map("session_id") @db.Uuid
+  exerciseId  String         @map("exercise_id") @db.Uuid
+  position    Int
+  sets        Int
+  repsMin     Int            @map("reps_min")
+  repsMax     Int            @map("reps_max")
+  restSeconds Int            @default(60) @map("rest_seconds")
+  cadence     String?
+  note        String?
+  groupKey    String?        @map("group_key") // liga itens consecutivos do mesmo bloco
+  groupType   ItemGroupType? @map("group_type")
+
+  session  PrescribedSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  exercise Exercise          @relation(fields: [exerciseId], references: [id], onDelete: Restrict)
+
+  @@unique([sessionId, position])
+  @@index([exerciseId])
+  @@map("prescribed_items")
+}
+
+// Estrutura copiada de um mesociclo (sessões e itens, no formato do corpo de POST /mesocycles,
+// sem studentId e datas). A cópia é independente: editar a ficha não muda o template, e
+// instanciar cria um DRAFT novo (RF-W07).
+model Template {
+  id          String   @id @db.Uuid
+  trainerId   String   @map("trainer_id") @db.Uuid
+  name        String
+  description String?
+  structure   Json
+  createdAt   DateTime @map("created_at") @db.Timestamptz
+  updatedAt   DateTime @map("updated_at") @db.Timestamptz
+
+  trainer User @relation(fields: [trainerId], references: [id], onDelete: Cascade)
+
+  @@index([trainerId, createdAt])
+  @@map("templates")
 }
 
 // =====================================================================

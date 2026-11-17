@@ -58,7 +58,13 @@ Os dados ficam nos volumes `postgres-data` e `storage-data`. `pnpm env:down` par
 
 Todo instante é `timestamptz` e as chaves primárias são UUID v7 geradas pelo `IdGenerator`, nunca pelo banco; `test/architecture/prisma-schema.spec.ts` confere as duas regras. A conexão fixa a sessão em UTC (`src/platform/database/pg-adapter.ts`): o adapter do Prisma envia e lê instantes sem offset, e um servidor com outro fuso deslocaria todos os horários.
 
-O Prisma não declara índices parciais nem restrições `CHECK`; quando uma regra precisa deles (como o único vínculo ativo por aluno, `links_one_active_per_student`), crie a migração com `pnpm db:migrate --create-only --name <nome>`, acrescente o SQL ao fim do `migration.sql` e aplique com `pnpm db:migrate`. O Prisma não tenta removê-los nas migrações seguintes. Cada regra assim tem teste em `test/integration/`.
+O Prisma não declara índices parciais nem restrições `CHECK`; quando uma regra precisa deles (como o único vínculo ativo por aluno, `links_one_active_per_student`), crie a migração com `pnpm db:migrate --create-only --name <nome>`, acrescente o SQL ao fim do `migration.sql` e aplique com `pnpm db:migrate`. Índices parciais e `CHECK` não são removidos nas migrações seguintes, mas um índice único comum que não está no schema é: declare-o no schema ou faça-o parcial. Para conferir, com a base migrada, o comando abaixo deve gerar uma migração vazia:
+
+```bash
+pnpm prisma migrate diff --from-config-datasource --to-schema prisma/schema.prisma --script
+```
+
+Cada regra em SQL tem teste em `test/integration/`.
 
 Transações abrem só no caso de uso, por `UnitOfWork.run(tx => ...)`; os repositórios recebem o `tx`.
 
