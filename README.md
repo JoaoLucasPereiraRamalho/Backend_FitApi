@@ -56,6 +56,8 @@ Os dados ficam nos volumes `postgres-data` e `storage-data`. `pnpm env:down` par
 | `pnpm db:seed`                  | Grava os dados iniciais (idempotente: rodar de novo não duplica)                 |
 | `pnpm db:reset`                 | Apaga a base local, reaplica todas as migrações e roda o seed (pede confirmação) |
 
+O seed (`prisma/seed/`) grava os grupamentos e equipamentos da biblioteca, o catálogo de badges e os parâmetros de negócio de `system_settings` (meta semanal, limiares do dia válido, janelas de edição e de recálculo, validade do convite, versão mínima do app). Catálogos e badges são definidos no código e atualizados a cada execução; parâmetros só são criados quando faltam, para não desfazer um ajuste feito na base. Os exercícios base entram na Sprint 3.
+
 Todo instante é `timestamptz` e as chaves primárias são UUID v7 geradas pelo `IdGenerator`, nunca pelo banco; `test/architecture/prisma-schema.spec.ts` confere as duas regras. A conexão fixa a sessão em UTC (`src/platform/database/pg-adapter.ts`): o adapter do Prisma envia e lê instantes sem offset, e um servidor com outro fuso deslocaria todos os horários.
 
 O Prisma não declara índices parciais nem restrições `CHECK`; quando uma regra precisa deles (como o único vínculo ativo por aluno, `links_one_active_per_student`), crie a migração com `pnpm db:migrate --create-only --name <nome>`, acrescente o SQL ao fim do `migration.sql` e aplique com `pnpm db:migrate`. Índices parciais e `CHECK` não são removidos nas migrações seguintes, mas um índice único comum que não está no schema é: declare-o no schema ou faça-o parcial. Para conferir, com a base migrada, o comando abaixo deve gerar uma migração vazia:
