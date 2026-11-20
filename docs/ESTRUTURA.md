@@ -293,14 +293,16 @@ Todos podem importar `shared-kernel` e `platform`. Ninguém importa `modules/*` 
 
 ### Testes de arquitetura (rodam no CI)
 
-Uma ferramenta de análise de dependências (por exemplo `dependency-cruiser` ou `eslint-plugin-boundaries`; são candidatas que eu não verifiquei, confirme na documentação) falha o pipeline quando:
+O `dependency-cruiser` (regras em `.dependency-cruiser.cjs`, comando `pnpm arch`) falha o pipeline quando:
 
 1. Um módulo importa arquivo que não seja o `index.ts` de outro módulo.
 2. A matriz acima é violada ou aparece um ciclo entre módulos.
 3. `domain/` importa NestJS, Prisma, `application/`, `api/` ou `infrastructure/`.
 4. `api/` importa `infrastructure/` ou Prisma.
 5. `platform/` ou `shared-kernel/` importam `modules/`.
-6. Algum arquivo fora de `platform/clock-and-ids` usa `new Date()`, `Date.now()` ou gera UUID direto (regra de lint customizada ou busca textual no CI).
+6. Algum arquivo fora de `platform/clock-and-ids` usa `new Date()`, `Date.now()` ou gera UUID direto. Esta regra fica no ESLint (`pnpm lint`), não no `pnpm arch`.
+
+Além das regras acima, o `pnpm arch` falha quando um controller importa repository ou Prisma, quando `shared-kernel/` importa `platform/` e quando algum import não pode ser resolvido (um import que a ferramenta não resolve não é checado por nenhuma regra). Para `domain/`, `api/` e controllers, "Prisma" inclui `platform/database`.
 
 Os testes de arquitetura são parte do card FT-7 do plano de sprints (Sprint 2).
 

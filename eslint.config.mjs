@@ -46,7 +46,14 @@ const noClockOrIdsOutsidePlatform = {
 
 export default tseslint.config(
   {
-    ignores: ['dist/**', 'coverage/**', 'src/generated/**', 'node_modules/**', 'eslint.config.mjs'],
+    ignores: [
+      'dist/**',
+      'coverage/**',
+      'src/generated/**',
+      'node_modules/**',
+      'eslint.config.mjs',
+      '.dependency-cruiser.cjs',
+    ],
   },
   eslint.configs.recommended,
   ...tseslint.configs.recommendedTypeChecked,
