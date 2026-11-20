@@ -27,6 +27,7 @@ jobs:
       - run: pnpm lint --max-warnings=0
       - run: pnpm prettier --check .
       - run: pnpm typecheck
+      - run: pnpm arch
       - run: pnpm test
       - run: pnpm build
 

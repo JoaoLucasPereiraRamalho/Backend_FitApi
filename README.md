@@ -159,6 +159,7 @@ Em `development` os logs saem formatados (pino-pretty); nos demais ambientes, em
 | `pnpm test` / `test:watch` / `test:cov`    | Testes (Vitest), sem banco                                              |
 | `pnpm test:integration`                    | Testes de integração contra o PostgreSQL de `DATABASE_URL`              |
 | `pnpm lint` / `pnpm typecheck`             | ESLint e TypeScript                                                     |
+| `pnpm arch`                                | Regras de dependência entre módulos e camadas (`dependency-cruiser`)    |
 | `pnpm db:migrate` / `db:seed` / `db:reset` | Migrações, dados iniciais e recriação da base local                     |
 
 ## Estrutura
